@@ -1,0 +1,243 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ USER MANAGEMENT ============
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  password          String
+  name              String?
+  avatar            String?
+  role              UserRole  @default(USER)
+  emailVerified     Boolean   @default(false)
+  verificationToken String?
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  credits           Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  audits        Audit[]
+  subscriptions Subscription[]
+  payments      Payment[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+// ============ AUDITS ============
+model Audit {
+  id              String   @id @default(cuid())
+  userId          String
+  shopifyUrl      String
+  status          AuditStatus @default(PENDING)
+  score           Float?
+  metrics         Json?
+  recommendations Json?
+  pdfUrl          String?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("audits")
+}
+
+enum AuditStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ============ SUBSCRIPTIONS ============
+model Subscription {
+  id             String         @id @default(cuid())
+  userId         String
+  plan           SubscriptionPlan
+  status         SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd Boolean @default(false)
+  cancelledAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@map("subscriptions")
+}
+
+enum SubscriptionPlan {
+  FREE
+  SINGLE
+  PACK_5
+  PACK_20
+  UNLIMITED_MONTHLY
+  AGENCY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  UNPAID
+}
+
+// ============ PAYMENTS ============
+model Payment {
+  id               String   @id @default(cuid())
+  userId           String
+  subscriptionId   String?
+  stripePaymentId  String   @unique
+  amount           Int      // in cents
+  currency         String   @default("eur")
+  status           PaymentStatus
+  description      String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([stripePaymentId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  SUCCEEDED
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+// ============ AUDIT QUEUE ============
+model AuditQueue {
+  id        String   @id @default(cuid())
+  auditId   String   @unique
+  priority  Int      @default(0)
+  status    QueueStatus @default(PENDING)
+  attempts  Int      @default(0)
+  maxAttempts Int    @default(3)
+  error     String?
+  scheduledAt DateTime @default(now())
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([priority])
+  @@index([scheduledAt])
+  @@map("audit_queue")
+}
+
+enum QueueStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRY
+}
+
+// ============ API USAGE ============
+model ApiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String
+  method    String
+  statusCode Int
+  duration  Int      // in milliseconds
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([endpoint])
+  @@index([createdAt])
+  @@map("api_usage")
+}
+
+// ============ SETTINGS ============
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  type  SettingType @default(STRING)
+  description String?
+
+  @@map("settings")
+}
+
+enum SettingType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+// ============ NOTIFICATIONS ============
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  data      Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  AUDIT_COMPLETED
+  PAYMENT_RECEIVED
+  SUBSCRIPTION_EXPIRING
+}
